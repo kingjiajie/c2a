@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from sqlalchemy import Column, String, Text, create_engine, Integer, text
@@ -35,10 +36,17 @@ class DatabaseStorageBackend(StorageBackend):
 
     def __init__(self, database_url: str):
         self.database_url = database_url
+        # 从环境变量读取连接池配置，适配云数据库连接限制
+        pool_size = int(os.getenv("DB_POOL_SIZE", "2"))        # 默认 2 个常驻连接
+        max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "2"))  # 默认 2 个溢出连接
+        print(f"[database] Pool config: pool_size={pool_size}, max_overflow={max_overflow}, max_connections={pool_size + max_overflow}")
         self.engine = create_engine(
             database_url,
-            pool_pre_ping=True,  # 自动检测连接是否有效
-            pool_recycle=3600,   # 1小时回收连接
+            pool_size=pool_size,         # 连接池大小
+            max_overflow=max_overflow,   # 溢出连接数
+            pool_pre_ping=True,          # 自动检测连接是否有效
+            pool_recycle=3600,           # 1小时回收连接
+            pool_timeout=30,             # 获取连接超时时间
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
