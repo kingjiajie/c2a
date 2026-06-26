@@ -1038,7 +1038,6 @@ class AccountService:
             return False
         removed = bool(self.delete_accounts([access_token])["removed"])
         if removed:
-            logger.warning(f"[account-watcher] auto removed invalid account: {anonymize_token(access_token)}, event={event}")
             log_service.add(LOG_TYPE_ACCOUNT, "自动移除异常账号",
                             {"source": event, "token": anonymize_token(access_token)})
         elif access_token:
@@ -1332,7 +1331,6 @@ class AccountService:
             from services.openai_backend_api import InvalidAccessTokenError, OpenAIBackendAPI
             result = OpenAIBackendAPI(active_token).get_user_info()
         except InvalidAccessTokenError as exc:
-            logger.warning(f"[account-watcher] token invalid (401): {anonymize_token(active_token)}, error={exc}")
             refreshed_token = self.refresh_access_token(active_token, force=True, event=f"{event}:invalid_access_token")
             if refreshed_token and refreshed_token != active_token:
                 try:
