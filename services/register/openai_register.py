@@ -49,11 +49,39 @@ platform_oauth_client_id = "app_2SKx67EdpoN0G6j64rFvigXD"
 platform_oauth_redirect_uri = f"{platform_base}/auth/callback"
 platform_oauth_audience = "https://api.openai.com/v1"
 platform_auth0_client = "eyJuYW1lIjoiYXV0aDAtc3BhLWpzIiwidmVyc2lvbiI6IjEuMjEuMCJ9"
-user_agent = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/145.0.0.0 Safari/537.36"
-)
+
+# 动态 UA 池（按真实市场份额分配，2026 年最新版本）
+# Chrome 63% (8个) + Edge 15% (3个) + Safari 10% (2个) + Firefox 5% (2个)
+UA_POOL = [
+    # Chrome Windows (5个)
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+
+    # Chrome macOS (2个)
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+
+    # Chrome Linux (1个)
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+
+    # Edge (3个)
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0",
+
+    # Safari macOS (2个)
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+
+    # Firefox (2个)
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0",
+]
+
+user_agent = UA_POOL[0]  # 默认值，实际使用时会随机选择
 sec_ch_ua = '"Google Chrome";v="145", "Not?A_Brand";v="8", "Chromium";v="145"'
 sec_ch_ua_full_version_list = '"Chromium";v="145.0.0.0", "Not:A-Brand";v="99.0.0.0", "Google Chrome";v="145.0.0.0"'
 default_timeout = 30
@@ -278,8 +306,10 @@ class SentinelTokenGenerator:
         return "gAAAAAB" + self.ERROR_PREFIX + self._b64(str(None))
 
 
-def build_sentinel_token(session: requests.Session, device_id: str, flow: str) -> str:
-    generator = SentinelTokenGenerator(device_id, user_agent)
+def build_sentinel_token(session: requests.Session, device_id: str, flow: str, ua: str = None) -> str:
+    """构建 sentinel token，支持自定义 UA"""
+    current_ua = ua or user_agent  # 使用传入的 UA 或默认值
+    generator = SentinelTokenGenerator(device_id, current_ua)
     resp = session.post(
         "https://sentinel.openai.com/backend-api/sentinel/req",
         data=json.dumps({"p": generator.generate_requirements_token(), "id": device_id, "flow": flow}),
@@ -287,7 +317,7 @@ def build_sentinel_token(session: requests.Session, device_id: str, flow: str) -
             "Content-Type": "text/plain;charset=UTF-8",
             "Referer": "https://sentinel.openai.com/backend-api/sentinel/frame.html",
             "Origin": "https://sentinel.openai.com",
-            "User-Agent": user_agent,
+            "User-Agent": current_ua,
             "sec-ch-ua": sec_ch_ua,
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
@@ -480,18 +510,22 @@ class PlatformRegistrar:
         self.proxy = proxy
         self.session = create_session(proxy)
         self.device_id = str(uuid.uuid4())
+        # 随机选择一个 UA
+        self.user_agent = random.choice(UA_POOL)
 
     def close(self) -> None:
         self.session.close()
 
     def _navigate_headers(self, referer: str = "") -> dict[str, str]:
         headers = dict(navigate_headers)
+        headers["user-agent"] = self.user_agent  # 使用实例的动态 UA
         if referer:
             headers["referer"] = referer
         return headers
 
     def _json_headers(self, referer: str) -> dict[str, str]:
         headers = dict(common_headers)
+        headers["user-agent"] = self.user_agent  # 使用实例的动态 UA
         headers["referer"] = referer
         headers["oai-device-id"] = self.device_id
         headers.update(_make_trace_headers())
@@ -531,7 +565,7 @@ class PlatformRegistrar:
     def _register_user(self, email: str, password: str, index: int) -> None:
         step(index, "开始提交注册密码")
         headers = self._json_headers(f"{auth_base}/create-account/password")
-        headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "username_password_create")
+        headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "username_password_create", self.user_agent)
         resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/user/register", json={"username": email, "password": password}, headers=headers, verify=False)
         if resp is None or resp.status_code != 200:
             data = _response_json(resp) if resp is not None else {}
@@ -558,7 +592,7 @@ class PlatformRegistrar:
     def _create_account(self, name: str, birthdate: str, index: int) -> str:
         step(index, "开始创建账号资料")
         headers = self._json_headers(f"{auth_base}/about-you")
-        headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "oauth_create_account")
+        headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "oauth_create_account", self.user_agent)
         resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/create_account", json={"name": name, "birthdate": birthdate}, headers=headers, verify=False)
         if resp is None or resp.status_code not in (200, 302):
             data = _response_json(resp) if resp is not None else {}
